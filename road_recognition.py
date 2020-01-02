@@ -8,7 +8,7 @@ from scipy.optimize import leastsq
 class RoadRecognition(object):
 
     def __init__(self):
-        self.filterSize =  #滤波核大小
+        self.filterSize = 7 #滤波核大小
         self.cannyMin = 50 #Canny边缘提取设置最小值
         self.cannyMax = 255 #Canny边缘提取设置最大值
         self.__leftFlag = False #是否识别到左侧车道
