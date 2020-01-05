@@ -8,11 +8,14 @@ from scipy.optimize import leastsq
 class RoadRecognition(object):
 
     def __init__(self):
-        self.filterSize = 7 #滤波核大小
-        self.cannyMin = 50 #Canny边缘提取设置最小值
-        self.cannyMax = 255 #Canny边缘提取设置最大值
+        self.filterSize = 5 #滤波核大小
+        self.cannyMin = 100 #Canny边缘提取设置最小值
+        self.cannyMax = 100 #Canny边缘提取设置最大值
         self.__leftFlag = False #是否识别到左侧车道
         self.__rightFlag = False #是否识别到右侧车道
+        self.__horizontalValue = 0.2
+        self.__adaptableValue = 0.2
+        self.__cropsize = 100
 
     def __func(self, p, x):
         '''
@@ -41,7 +44,7 @@ class RoadRecognition(object):
                    每一列都有直线的起始点坐标x1, y1, 终点坐标x2, y2
                    如果没有识别到车道返回None
         '''
-        cropImg = img[80:] #图片裁剪
+        cropImg = img[self.__cropsize:] #图片裁剪
 
         grayImg = cv2.cvtColor(cropImg, cv2.COLOR_BGR2GRAY) #灰度化
         medianImg = cv2.medianBlur(grayImg, self.filterSize) #中值模糊
@@ -52,6 +55,35 @@ class RoadRecognition(object):
             return None
         else:
             return lines[:, 0, :]
+
+    def lineOptimize(self, lines):
+        new_lines = np.empty([0, 4], dtype=int)
+        leftMaxValue = -1;
+        rightMaxValue = 1;
+
+        for x1, y1, x2, y2 in lines:
+            k = (y1 - y2) / (x1 - x2)
+            if k > 0 and k > leftMaxValue:
+                leftMaxValue = k
+            if k < 0 and k < rightMaxValue:
+                rightMaxValue = k
+
+        print('left:', leftMaxValue, 'right:', rightMaxValue)
+
+        for x1, y1, x2, y2 in lines:
+            k = (y1 - y2) / (x1 - x2)
+            if k > self.__horizontalValue:
+                if k > leftMaxValue - self.__adaptableValue and \
+                   k < leftMaxValue + self.__adaptableValue:
+                    new_lines = np.append(new_lines, [[x1, y1, x2, y2]], axis=0)
+            else:
+                if k > rightMaxValue - self.__adaptableValue and \
+                   k < rightMaxValue + self.__adaptableValue:
+                    new_lines = np.append(new_lines, [[x1, y1, x2, y2]], axis=0)
+
+        return new_lines
+
+
 
     def LSM(self, lines):
         '''
@@ -99,7 +131,7 @@ class RoadRecognition(object):
             k2, b2 = Para2[0]
         return k1, b1, k2, b2
 
-    def turnPredition(self, k1, b1, k2, b2):
+    def turnPredite(self, k1, b1, k2, b2):
         '''
         转向预测
             通过拟合后的两条直线判断是否需要转向
@@ -141,11 +173,11 @@ class RoadRecognition(object):
             else:
                 k1, b1, k2, b2 = self.LSM(lines)  # 最小二乘法拟合
                 if k1 != 0 or b1 != 0:
-                    b1 += 80
+                    b1 += self.__cropsize
                     cv2.line(img, (0, int(b1)), (320, int(k1 * 320 + b1)), (255, 0, 0), 2)
 
                 if k2 != 0 or b2 != 0:
-                    b2 += 80
+                    b2 += self.__cropsize
                     cv2.line(img, (0, int(b2)), (320, int(k2 * 320 + b2)), (0, 0, 255), 2)
 
             cv2.imshow('Visualization', img)  # 显示视频帧
@@ -162,27 +194,42 @@ class RoadRecognition(object):
         参数：
             img: 图像数据
         '''
+        img = cv2.resize(img, (320, 240))
 
-        cropImg = img[80:]  # 图片裁剪
+        cropImg = img[self.__cropsize:]  # 图片裁剪
         grayImg = cv2.cvtColor(cropImg, cv2.COLOR_BGR2GRAY)  # 灰度化
-        medianImg = cv2.medianBlur(grayImg, self.filterSize)  # 中值模糊
+        cv2.imshow('gray image', grayImg)
+        #medianImg = cv2.medianBlur(grayImg, self.filterSize)  # 中值模糊
+        medianImg = cv2.GaussianBlur(grayImg, (5, 5), 0)
+        cv2.imshow('medianImg', medianImg)
         cannyMedianImg = cv2.Canny(medianImg, self.cannyMin, self.cannyMax)  # Canny边缘检测
         cv2.imshow('Canny', cannyMedianImg)
+        line_img = np.zeros([240, 320, 3])
 
+        lines = cv2.HoughLinesP(cannyMedianImg, 1, np.pi / 180, 30, minLineLength=5, maxLineGap=10)  # 霍夫变换道路检测
+        lines = lines[:, 0, :]
 
-        lines = self.imageProcess(img) #图像处理
+        print('line amount:', lines.shape[0])
+        #lines = self.lineOptimize(lines)
 
         if lines is not None:  # 如果检测到车道
+            for x1, y1, x2, y2 in lines:
+                y1 += self.__cropsize
+                y2 += self.__cropsize
+                cv2.line(line_img, (x1, y1), (x2, y2), (255, 0, 0), 1)
+
             k1, b1, k2, b2 = self.LSM(lines)  # 最小二乘法拟合
             if k1 != 0 or b1 != 0:
-                b1 += 80
+                b1 += self.__cropsize
                 cv2.line(img, (0, int(b1)), (320, int(k1 * 320 + b1)), (255, 0, 0), 2)
 
             if k2 != 0 or b2 != 0:
-                b2 += 80
+                b2 += self.__cropsize
                 cv2.line(img, (0, int(b2)), (320, int(k2 * 320 + b2)), (0, 0, 255), 2)
 
-        cv2.imshow('TestOneImage', img)
+
+        cv2.imshow('LSM', img)
+        cv2.imshow('Hough', line_img)
 
         cv2.waitKey(0)
         cv2.destroyAllWindows()
